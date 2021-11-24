@@ -1,0 +1,5 @@
+gpus: -1
+max_steps: 100000
+progress_bar_refresh_rate: 10
+resume_from_checkpoint: null
+num_sanity_val_steps: 10

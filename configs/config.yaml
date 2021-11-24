@@ -1,0 +1,8 @@
+defaults:
+  - data: text
+  - model: default
+  - trainer: default
+
+
+working_dir: ${hydra:runtime.cwd}
+data_dir: ${working_dir}/../data

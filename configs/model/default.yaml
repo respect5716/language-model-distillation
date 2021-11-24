@@ -1,0 +1,7 @@
+teacher:
+  architecture: klue/bert-base
+
+
+student:
+  num_hidden_layers: 6
+  hidden_size: 384

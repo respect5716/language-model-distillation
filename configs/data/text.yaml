@@ -1,0 +1,10 @@
+defaults:
+  - default.yaml
+
+name: text
+
+datasets:
+  - namuwiki
+  - modu_spoken
+  - modu_written
+  - modu_newspaper

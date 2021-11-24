@@ -1,0 +1,4 @@
+pytorch_lightning
+transformers
+datsets
+hydra-core

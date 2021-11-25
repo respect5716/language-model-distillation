@@ -1,8 +1,10 @@
 defaults:
+  - _self_
   - data: text
-  - model: default
-  - trainer: default
+  - model: minilmv2
+  - trainer: full
 
-
+project_name: language-model-distillation
 working_dir: ${hydra:runtime.cwd}
-data_dir: ${working_dir}/../data
+data_dir: ${working_dir}/data
+ckpt_dir: ${working_dir}/ckpt

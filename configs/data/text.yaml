@@ -1,10 +1,14 @@
 defaults:
-  - default.yaml
+  - default
+
+_target_: src.data.text.DataModule
 
 name: text
+data_dir: ${data_dir}
+teacher_name_or_model_path: ${model.teacher.name_or_model_path}
 
 datasets:
   - namuwiki
-  - modu_spoken
-  - modu_written
-  - modu_newspaper
+  - modu-spoken
+  - modu-written
+  - modu-newspaper

@@ -1,4 +1,4 @@
-data_dir: ${data_dir}
-batch_size: 16
+batch_size: 4
 num_workers: 8
 pin_memory: false
+max_seq_length: 512

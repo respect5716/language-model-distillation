@@ -1,7 +1,0 @@
-defaults:
-  - default.yaml
-
-_target_: src.model.distil_bert.Model
-
-student:
-  num_hidden_layers: null

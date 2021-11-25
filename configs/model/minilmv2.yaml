@@ -1,0 +1,11 @@
+defaults:
+  - default
+
+_target_: src.model.minilmv2.Model
+
+student:
+  hidden_size: 384
+
+num_relation_heads: 48
+teacher_layer_index: -1
+student_layer_index: -1

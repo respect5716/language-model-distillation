@@ -1,0 +1,16 @@
+defaults:
+  - default
+
+max_steps: 100
+accumulate_grad_batches: 1
+
+
+callbacks:
+  -
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: ${ckpt_dir}
+    filename: "{step:06d}"
+    save_weights_only: true
+    every_n_train_steps: 10
+    verbose: true
+  

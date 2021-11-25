@@ -70,7 +70,6 @@ class BaseModel(pl.LightningModule):
             'lr_scheduler': {
                 'scheduler': scheduler,
                 'interval': 'step',
-                'frequency': self.hparams.optim.accumulate_grad_batches,
             }
         }
 

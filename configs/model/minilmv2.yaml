@@ -1,7 +1,7 @@
+_target_: src.model.minilmv2.Model
+
 defaults:
   - default
-
-_target_: src.model.minilmv2.Model
 
 student:
   hidden_size: 384

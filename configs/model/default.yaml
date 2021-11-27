@@ -1,25 +1,22 @@
 teacher:
-  name_or_model_path: klue/bert-base
-
+  model_name_or_path: klue/bert-base
 
 student:
   num_hidden_layers: 6
 
-
 optim:
+  # optimizer
   lr: 6e-4
   betas: 
     - 0.9
-    - 0.98
+    - 0.999
   weight_decay: 0.01
-  adam_epsilon: 1e-8
 
   # scheduler
   scheduler: linear
   max_steps: ${trainer.max_steps}
   warmup_ratio: 0.05
-  accumulate_grad_batches: ${trainer.accumulate_grad_batches}
 
 
 ckpt_dir: ${ckpt_dir}
-
+mlm: false

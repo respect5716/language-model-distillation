@@ -8,7 +8,7 @@ callbacks:
     dirpath: ${ckpt_dir}
     filename: "{step:06d}"
     save_weights_only: true
-    every_n_train_steps: 1000
+    every_n_train_steps: 10000
     verbose: true
   
   -
@@ -18,5 +18,5 @@ callbacks:
 logger:
   _target_: pytorch_lightning.loggers.WandbLogger
   project: ${project_name}
-  log_model: true
+  log_model: false
   reinit: true

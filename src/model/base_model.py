@@ -3,7 +3,7 @@ import os
 import torch
 import pytorch_lightning as pl
 
-from transformers import AutoModel, AutoTokenizer, AutoConfig
+from transformers import AutoModel, AutoModelForMaskedLM, AutoTokenizer, AutoConfig
 from transformers import get_scheduler
 
 
@@ -11,28 +11,28 @@ class BaseModel(pl.LightningModule):
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.save_hyperparameters()
-        self.teacher, self.student, self.tokenizer = self.prepare_models()
+        self.teacher, self.student, self.tokenizer = self.prepare()
     
-    def prepare_models(self):
-        teacher = AutoModel.from_pretrained(
-            self.hparams.teacher.name_or_model_path,
+    def prepare(self):
+        teacher = AutoModelForMaskedLM.from_pretrained(
+            self.hparams.teacher.model_name_or_path,
             output_attentions = True,
             output_hidden_states = True
         )
         
         config = AutoConfig.from_pretrained(
-            self.hparams.teacher.name_or_model_path,
+            self.hparams.teacher.model_name_or_path,
             output_attention = True,
             output_hidden_states = True,
             **self.hparams.student
         )
         
-        student = AutoModel.from_config(config)
+        student = AutoModelForMaskedLM.from_config(config)
         
         for param in teacher.parameters():
             param.requires_grad = False
         
-        tokenizer = AutoTokenizer.from_pretrained(self.hparams.teacher.name_or_model_path)
+        tokenizer = AutoTokenizer.from_pretrained(self.hparams.teacher.model_name_or_path)
         return teacher, student, tokenizer
     
     
@@ -54,12 +54,11 @@ class BaseModel(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
+        optimizer = torch.optim.Adam(
             self.student_param_groups(), 
             lr = self.hparams.optim.lr, 
             betas = self.hparams.optim.betas,
             weight_decay = self.hparams.optim.weight_decay,
-            eps = self.hparams.optim.adam_epsilon,
         )
 
         num_training_steps = self.hparams.optim.max_steps
@@ -76,6 +75,6 @@ class BaseModel(pl.LightningModule):
 
     @pl.utilities.rank_zero_only
     def on_save_checkpoint(self, checkpoint):
-        save_dir = os.path.join(self.hparams.ckpt_dir, 'transformers')
-        self.student.save_pretrained(save_dir)
-        self.tokenizer.save_pretrained(save_dir)
+        ckpt_dir = os.path.join(self.hparams.ckpt_dir, f'{self.trainer.global_step:06d}', 'transformers')
+        self.student.save_pretrained(ckpt_dir)
+        self.tokenizer.save_pretrained(ckpt_dir)

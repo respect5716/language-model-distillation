@@ -19,30 +19,32 @@ class Model(BaseModel):
         return teacher, student, tokenizer
 
 
-    def step(self, batch, phase):
+    def training_step(self, batch, batch_idx):
         teacher_outputs = self.teacher(**batch)
         student_outputs = self.student(**batch)
+
+        loss_logits = logits_loss_fn(teacher_outputs.logits, student_outputs.logits, self.hparams.temperature, batch.attention_mask)
+        loss_mlm = student_outputs.loss
 
         teacher_qkv = get_qkvs(self.teacher)[self.hparams.teacher_layer_index] # (batch, head, seq, head_dim)
         student_qkv = get_qkvs(self.student)[self.hparams.student_layer_index] # (batch, head, seq, head_dim)
 
-        loss_q = minilm_loss(teacher_qkv['q'], student_qkv['q'], num_relation_heads=self.hparams.num_relation_heads, attention_mask=batch.attention_mask)
-        loss_k = minilm_loss(teacher_qkv['k'], student_qkv['k'], num_relation_heads=self.hparams.num_relation_heads, attention_mask=batch.attention_mask)
-        loss_v = minilm_loss(teacher_qkv['v'], student_qkv['v'], num_relation_heads=self.hparams.num_relation_heads, attention_mask=batch.attention_mask)
-        loss = loss_q + loss_k + loss_v
+        loss_q = minilm_loss_fn(teacher_qkv['q'], student_qkv['q'], num_relation_heads=self.hparams.num_relation_heads, attention_mask=batch.attention_mask)
+        loss_k = minilm_loss_fn(teacher_qkv['k'], student_qkv['k'], num_relation_heads=self.hparams.num_relation_heads, attention_mask=batch.attention_mask)
+        loss_v = minilm_loss_fn(teacher_qkv['v'], student_qkv['v'], num_relation_heads=self.hparams.num_relation_heads, attention_mask=batch.attention_mask)
+        loss_minilm = loss_q + loss_k + loss_v
 
-        log = {f'{phase}/loss': loss, f'{phase}/loss_q': loss_q, f'{phase}/loss_k': loss_k, f'{phase}/loss_v': loss_v}
-        self.log_dict({f'{phase}/loss': loss}, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        loss = self.hparams.alpha_logits * loss_logits + self.hparams.alpha_mlm * loss_mlm + self.hparams.alpha_minilm * loss_minilm
+        log = {'train/loss': loss, 'train/loss_logits': loss_logits, 'train/loss_mlm': loss_mlm, 'train/loss_minilm': loss_minilm}
+        self.log_dict(log, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
-    def training_step(self, batch, batch_idx):
-        return self.step(batch, 'train')
-
+    
     def validation_step(self, batch, batch_idx):
-        return self.step(batch, 'valid')
-
-    def test_step(self, batch, batch_idx):
-        return self.step(batch, 'test')
+        student_outputs = self.student(**batch)
+        loss = student_outputs.loss
+        log = {'valid/loss': loss, 'valid/loss_mlm': loss}
+        return loss
 
 
 def to_distill(model):
@@ -79,12 +81,28 @@ def relation_attention(h, num_relation_heads, attention_mask=None):
     return attn
 
 
-def minilm_loss(t, s, num_relation_heads, attention_mask=None):
+def minilm_loss_fn(t, s, num_relation_heads, attention_mask=None):
     attn_t = relation_attention(t, num_relation_heads, attention_mask)
     attn_s = relation_attention(s, num_relation_heads, attention_mask)
     loss = F.kl_div(F.log_softmax(attn_s, dim=-1), F.softmax(attn_t, dim=-1), reduction='batchmean')
     return loss
 
+
+def logits_loss_fn(t, s, temperature=1., attention_mask=None):
+    if attention_mask is not None:
+        t = select_tensor(t, attention_mask)
+        s = select_tensor(s, attention_mask)
+    t = F.softmax(t / temperature, dim=-1)
+    s = F.log_softmax(s / temperature, dim=-1)
+    loss = F.kl_div(s, t, reduction='batchmean')
+    return loss
+
+
+def select_tensor(tensor, attention_mask):
+    mask = attention_mask.unsqueeze(-1).expand_as(tensor).bool()
+    selected = torch.masked_select(tensor, mask)  # (bs * seq_length * voc_size)
+    selected = selected.view(-1, tensor.size(-1))  # (bs * seq_length, voc_size)
+    return selected
 
 def bert_self_attention_forward(
     self,

@@ -1,0 +1,10 @@
+_target_: src.model.minilmv2_mlm.Model
+
+defaults:
+  - minilmv2
+
+temperature: 2.0
+
+alpha_logits: 5.0
+alpha_mlm: 1.0
+alpha_minilm: 1.0

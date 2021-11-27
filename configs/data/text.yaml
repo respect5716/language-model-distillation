@@ -1,14 +1,16 @@
+_target_: src.data.text.DataModule
+
 defaults:
   - default
 
-_target_: src.data.text.DataModule
-
-name: text
 data_dir: ${data_dir}
-teacher_name_or_model_path: ${model.teacher.name_or_model_path}
+pretrained_model_name_or_path: ${model.teacher.model_name_or_path}
+mlm: ${model.mlm}
 
 datasets:
   - namuwiki
   - modu-spoken
   - modu-written
   - modu-newspaper
+
+

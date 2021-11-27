@@ -9,8 +9,13 @@ def main(config: DictConfig):
 
     data_module = hydra.utils.instantiate(config.data)
     model = hydra.utils.instantiate(config.model)
-    trainer = hydra.utils.instantiate(config.trainer)
+
+    # data_module.setup()
+    # d = next(iter(data_module.train_dataloader()))
+    # loss = model.training_step(d, 0)    
+    trainer = hydra.utils.instantiate(config.trainer, model=model)
     trainer.fit(model, data_module)
+
 
 if __name__ == '__main__':
     main()

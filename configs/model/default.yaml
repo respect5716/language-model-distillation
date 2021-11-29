@@ -4,16 +4,16 @@ teacher:
 student:
   num_hidden_layers: 6
 
-optim:
-  # optimizer
+optimizer:
+  name: adamw
   lr: 6e-4
   betas: 
     - 0.9
-    - 0.999
+    - 0.98
   weight_decay: 0.01
 
-  # scheduler
-  scheduler: linear
+scheduler:
+  name: linear
   max_steps: ${trainer.max_steps}
   warmup_ratio: 0.05
 

@@ -42,7 +42,7 @@ class BaseModel(pl.LightningModule):
             {
                 # apply weight decay
                 "params": [p for n, p in self.student.named_parameters() if not any(nd in n.lower() for nd in no_decay)],
-                "weight_decay": self.hparams.optim.weight_decay
+                "weight_decay": self.hparams.optimizer.weight_decay
             },
             {
                 # not apply weight decay
@@ -54,16 +54,8 @@ class BaseModel(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.student_param_groups(), 
-            lr = self.hparams.optim.lr, 
-            betas = self.hparams.optim.betas,
-            weight_decay = self.hparams.optim.weight_decay,
-        )
-
-        num_training_steps = self.hparams.optim.max_steps
-        num_warmup_steps = int(num_training_steps * self.hparams.optim.warmup_ratio)
-        scheduler = get_scheduler(self.hparams.optim.scheduler, optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
+        optimizer = prepare_optimizer(self.student_param_groups(), self.hparams.optimizer)
+        scheduler = prepare_scheduler(optimizer, self.hparams.scheduler)
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
@@ -78,3 +70,21 @@ class BaseModel(pl.LightningModule):
         ckpt_dir = os.path.join(self.hparams.ckpt_dir, f'{self.trainer.global_step:06d}', 'transformers')
         self.student.save_pretrained(ckpt_dir)
         self.tokenizer.save_pretrained(ckpt_dir)
+
+
+optim_dict = {
+    'adam': torch.optim.Adam,
+    'adamw': torch.optim.AdamW
+}
+
+def prepare_optimizer(params, optimizer_hparams):
+    name = optimizer_hparams['name']
+    hparams = {k:v for k,v in optimizer_hparams.items() if k != 'name'}
+    return optim_dict[name](params, **hparams)
+
+
+def prepare_scheduler(optimizer, scheduler_hparams):
+    num_training_steps = scheduler_hparams['max_steps']
+    num_warmup_steps = int(num_training_steps * scheduler_hparams['warmup_ratio'])
+    scheduler = get_scheduler(scheduler_hparams['name'], optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
+    return scheduler

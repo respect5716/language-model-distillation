@@ -6,8 +6,8 @@ from .base_model import BaseModel
 
 class Model(BaseModel):
     def step(self, batch, phase):
-        to = self.student(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
-        so = self.teacher(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
+        to = self.teacher(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
+        so = self.student(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
 
         th = to.hidden_states
         sh = so.hidden_states

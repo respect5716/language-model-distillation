@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
-import torch.nn.function as F
+import torch.nn.functional as F
 
 from .base_model import BaseModel
 
 class Model(BaseModel):
     def step(self, batch, phase):
-        to = self.student(**batch)
-        so = self.teacher(**batch)
+        to = self.student(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
+        so = self.teacher(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
 
         th = to.hidden_states
         sh = so.hidden_states
@@ -21,17 +21,13 @@ class Model(BaseModel):
         tel = relation_attention(th[0], th[-1], self.hparams.num_relation_heads, batch.attention_mask) # teacher embedding -> last hidden attn
         sel = relation_attention(sh[0], sh[-1], self.hparams.num_relation_heads, batch.attention_mask) # student embedding -> last hidden attn
 
-        tle = relation_attention(th[-1], th[0], self.hparams.num_relation_heads, batch.attention_mask) # teacher last hidden -> embedding attn
-        sle = relation_attention(sh[-1], sh[0], self.hparams.num_relation_heads, batch.attention_mask) # student last hidden -> embedding attn
-
         loss_e = kl_div_loss(se, te, temperature=self.hparams.temperature)
         loss_l = kl_div_loss(sl, tl, temperature=self.hparams.temperature)
         loss_el = kl_div_loss(sel, tel, temperature=self.hparams.temperature)
-        loss_le = kl_div_loss(sle, tle, temperature=self.hparams.temperature)
-        loss = loss_e + loss_l + loss_el + loss_le
+        loss = loss_e + loss_l + loss_el
 
-        log = {f'{phase}/loss': loss, f'{phase}/loss_e': loss_e, f'{phase}/loss_l': loss_l, f'{phase}/loss_el': loss_el, f'{phase}/loss_le': loss_le}
-        self.log_dict({f'{phase}/loss': loss}, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        log = {f'{phase}/loss': loss, f'{phase}/loss_e': loss_e, f'{phase}/loss_l': loss_l, f'{phase}/loss_el': loss_el}
+        self.log_dict(log, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def training_step(self, batch, batch_idx):

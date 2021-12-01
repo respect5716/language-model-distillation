@@ -20,8 +20,8 @@ class Model(BaseModel):
 
 
     def step(self, batch, phase):
-        teacher_outputs = self.teacher(**batch)
-        student_outputs = self.student(**batch)
+        teacher_outputs = self.teacher(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
+        student_outputs = self.student(input_ids=batch.input_ids, attention_mask=batch.attention_mask)
 
         teacher_qkv = get_qkvs(self.teacher)[self.hparams.teacher_layer_index] # (batch, head, seq, head_dim)
         student_qkv = get_qkvs(self.student)[self.hparams.student_layer_index] # (batch, head, seq, head_dim)
@@ -46,10 +46,7 @@ class Model(BaseModel):
 
 
 def to_distill(model):
-    # class method
     model.base_model.encoder.layer[0].attention.self.__class__._forward = bert_self_attention_forward
-
-    # instance method
     for layer in model.base_model.encoder.layer:
         layer.attention.self.forward = layer.attention.self._forward
     
@@ -72,7 +69,7 @@ def relation_attention(h, num_relation_heads, attention_mask=None):
     attn = torch.matmul(h, h.transpose(-1, -2)) # (batch_size, num_relation_heads, seq_length, seq_length)
     if attention_mask is not None:
         attention_mask = attention_mask[:, None, None, :]
-        attention_masks = (1 - attention_mask) * -10000.0
+        attention_mask = (1 - attention_mask) * -10000.0
         attn = attn + attention_mask
 
     attn = attn.view(-1, seq_length)

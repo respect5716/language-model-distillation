@@ -1,0 +1,10 @@
+_target_: src.model.layer_relation.Model
+
+defaults:
+  - default
+
+student:
+  hidden_size: 384
+
+num_relation_heads: 48
+temperature: 1.

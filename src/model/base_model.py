@@ -14,7 +14,12 @@ class BaseModel(pl.LightningModule):
         self.teacher, self.student, self.tokenizer = self.prepare()
     
     def prepare(self):
-        teacher = AutoModelForMaskedLM.from_pretrained(
+        if self.hparams.mlm:
+            model_cls = AutoModelForMaskedLM
+        else:
+            model_cls = AutoModel
+        
+        teacher = model_cls.from_pretrained(
             self.hparams.teacher.model_name_or_path,
             output_attentions = True,
             output_hidden_states = True
@@ -27,7 +32,7 @@ class BaseModel(pl.LightningModule):
             **self.hparams.student
         )
         
-        student = AutoModelForMaskedLM.from_config(config)
+        student = model_cls.from_config(config)
         
         for param in teacher.parameters():
             param.requires_grad = False
@@ -67,7 +72,7 @@ class BaseModel(pl.LightningModule):
 
     @pl.utilities.rank_zero_only
     def on_save_checkpoint(self, checkpoint):
-        ckpt_dir = os.path.join(self.hparams.ckpt_dir, f'{self.trainer.global_step:06d}', 'transformers')
+        ckpt_dir = os.path.join(self.hparams.ckpt_dir, f'{self.trainer.global_step:06d}')
         self.student.save_pretrained(ckpt_dir)
         self.tokenizer.save_pretrained(ckpt_dir)
 

@@ -4,7 +4,8 @@ defaults:
   - minilmv2
 
 temperature: 2.0
+mlm: true
 
-alpha_logits: 5.0
+alpha_logits: 3.0
 alpha_mlm: 1.0
-alpha_minilm: 1.0
+alpha_minilm: 2.0

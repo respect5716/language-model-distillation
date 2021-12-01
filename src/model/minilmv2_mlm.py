@@ -74,7 +74,7 @@ def relation_attention(h, num_relation_heads, attention_mask=None):
     attn = torch.matmul(h, h.transpose(-1, -2)) # (batch_size, num_relation_heads, seq_length, seq_length)
     if attention_mask is not None:
         attention_mask = attention_mask[:, None, None, :]
-        attention_masks = (1 - attention_mask) * -10000.0
+        attention_mask = (1 - attention_mask) * -10000.0
         attn = attn + attention_mask
 
     attn = attn.view(-1, seq_length)

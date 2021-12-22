@@ -1,4 +1,4 @@
-_target_: src.model.minilmv2_mlm.Model
+_target_: src.model.minilmv2_extend.Model
 
 defaults:
   - default
@@ -6,7 +6,6 @@ defaults:
 student:
   hidden_size: 384
 
-mlm: true
 num_relation_heads: 48
 temperature: 1.0
 teacher_layer_index: -1

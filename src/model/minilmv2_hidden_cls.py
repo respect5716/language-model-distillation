@@ -23,15 +23,27 @@ class Model(BaseModel):
         teacher_outputs = self.teacher(**batch)
         student_outputs = self.student(**batch)
 
+        # cls loss
+        teacher_cls = teacher_outputs.last_hidden_state[:, 0].unsqueeze(0) # (1, bs, dim)
+        student_cls = student_outputs.last_hidden_state[:, 0].unsqueeze(0) # (1, bs, dim)
+        # loss_cls = distance_loss_fn(student_cls, teacher_cls) * 10
+        loss_cls = minilm_loss(teacher_cls, student_cls, self.hparams.num_relation_heads, None, self.hparams.temperature)
+
+        # minilm loss
         teacher_qkv = get_qkvs(self.teacher)[self.hparams.teacher_layer_index] # (batch, head, seq, head_dim)
         student_qkv = get_qkvs(self.student)[self.hparams.student_layer_index] # (batch, head, seq, head_dim)
+
+        teacher_hidden = teacher_outputs.hidden_states[self.hparams.teacher_layer_index]
+        student_hidden = student_outputs.hidden_states[self.hparams.student_layer_index]
 
         loss_q = minilm_loss(teacher_qkv['q'], student_qkv['q'], self.hparams.num_relation_heads, batch.attention_mask, self.hparams.temperature)
         loss_k = minilm_loss(teacher_qkv['k'], student_qkv['k'], self.hparams.num_relation_heads, batch.attention_mask, self.hparams.temperature)
         loss_v = minilm_loss(teacher_qkv['v'], student_qkv['v'], self.hparams.num_relation_heads, batch.attention_mask, self.hparams.temperature)
-        loss = loss_q + loss_k + loss_v
+        loss_hidden = minilm_loss(teacher_hidden, student_hidden, self.hparams.num_relation_heads, batch.attention_mask, self.hparams.temperature)        
+        
+        loss = loss_cls + loss_q + loss_k + loss_v + loss_hidden
 
-        log = {f'{phase}/loss': loss, f'{phase}/loss_q': loss_q, f'{phase}/loss_k': loss_k, f'{phase}/loss_v': loss_v}
+        log = {f'{phase}/loss': loss, f'{phase}/loss_cls': loss_cls, f'{phase}/loss_q': loss_q, f'{phase}/loss_k': loss_k, f'{phase}/loss_v': loss_v, f'{phase}/loss_hidden': loss_hidden}
         self.log_dict(log, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
@@ -47,8 +59,16 @@ class Model(BaseModel):
 
 def to_distill(model):
     model.base_model.encoder.layer[0].attention.self.__class__._forward = bert_self_attention_forward
+    model.base_model.encoder.layer[0].attention.output.__class__._forward = bert_self_output_forward
+    model.base_model.encoder.layer[0].intermediate.__class__._forward = bert_intermediate_forward
+    model.base_model.encoder.layer[0].output.__class__._forward = bert_output_forward
+
     for layer in model.base_model.encoder.layer:
         layer.attention.self.forward = layer.attention.self._forward
+        layer.attention.output.forward = layer.attention.output._forward
+        layer.intermediate.forward = layer.intermediate._forward
+        layer.output.forward = layer.output._forward
+
     return model
 
 
@@ -56,6 +76,17 @@ def get_qkvs(model):
     attns = [l.attention.self for l in model.base_model.encoder.layer]
     qkvs = [{'q': a.q, 'k': a.k, 'v': a.v} for a in attns]    
     return qkvs
+
+
+def get_hiddens(model):
+    hiddens = []
+    for layer in model.base_model.encoder.layer:
+        hidden = {}
+        hidden['hidden1'] = layer.attention.output.hidden
+        hidden['hidden2'] = layer.intermediate.hidden
+        hidden['hidden3'] = layer.output.hidden
+        hiddens.append(hidden)
+    return hiddens
 
 
 def transpose_for_scores(h, num_heads):
@@ -96,6 +127,19 @@ def minilm_loss(t, s, num_relation_heads, attention_mask=None, temperature=1.0):
     attn_s = attention(s, s, num_relation_heads, attention_mask)
     loss = kl_div_loss(attn_s, attn_t, temperature=temperature)
     return loss
+
+
+def cdist(v):
+    d = torch.cdist(v, v, p=2)
+    m = d[d>0].mean()
+    return d / m
+
+def distance_loss_fn(s, t):
+    s = s.contiguous()
+    t = t.contiguous()
+    td = cdist(t)
+    sd = cdist(s)
+    return F.smooth_l1_loss(sd, td, reduction='mean')
 
 
 def bert_self_attention_forward(
@@ -161,3 +205,26 @@ def bert_self_attention_forward(
     if self.is_decoder:
         outputs = outputs + (past_key_value,)
     return outputs
+
+
+def bert_self_output_forward(self, hidden_states, input_tensor):
+    hidden_states = self.dense(hidden_states)
+    self.hidden = hidden_states
+    hidden_states = self.dropout(hidden_states)
+    hidden_states = self.LayerNorm(hidden_states + input_tensor)
+    return hidden_states
+
+
+def bert_intermediate_forward(self, hidden_states):
+    hidden_states = self.dense(hidden_states)
+    self.hidden = hidden_states
+    hidden_states = self.intermediate_act_fn(hidden_states)
+    return hidden_states
+
+
+def bert_output_forward(self, hidden_states, input_tensor):
+    hidden_states = self.dense(hidden_states)
+    self.hidden = hidden_states
+    hidden_states = self.dropout(hidden_states)
+    hidden_states = self.LayerNorm(hidden_states + input_tensor)
+    return hidden_states

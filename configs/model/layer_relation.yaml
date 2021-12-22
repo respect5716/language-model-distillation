@@ -7,4 +7,9 @@ student:
   hidden_size: 384
 
 num_relation_heads: 48
-temperature: 1.
+temperature: 0.3
+
+teacher_embedding_index: 0
+teacher_last_index: 11
+student_embedding_index: 0
+student_last_index: -1

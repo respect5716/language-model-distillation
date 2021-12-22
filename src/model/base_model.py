@@ -19,21 +19,23 @@ class BaseModel(pl.LightningModule):
         else:
             model_cls = AutoModel
         
+        teacher_kwargs = {k:v for k, v in self.hparams.teacher.items() if k not in ['model_name_or_path']}
         teacher = model_cls.from_pretrained(
             self.hparams.teacher.model_name_or_path,
-            output_attentions = True,
-            output_hidden_states = True
+            **teacher_kwargs
         )
         
+        if not self.hparams.student.model_name_or_path:
+            self.hparams.student.model_name_or_path = self.hparams.teacher.model_name_or_path
+        
+        student_kwargs = {k:v for k, v in self.hparams.student.items() if k not in ['model_name_or_path']}
         config = AutoConfig.from_pretrained(
-            self.hparams.teacher.model_name_or_path,
-            output_attention = True,
-            output_hidden_states = True,
-            **self.hparams.student
+            self.hparams.student.model_name_or_path,
+            **student_kwargs
         )
         
         student = model_cls.from_config(config)
-        
+   
         for param in teacher.parameters():
             param.requires_grad = False
         

@@ -1,9 +1,0 @@
-_target_: src.model.minilmv2.Model
-
-defaults:
-  - default
-
-num_relation_heads: 48
-temperature: 1.0
-teacher_layer_index: -1
-student_layer_index: -1

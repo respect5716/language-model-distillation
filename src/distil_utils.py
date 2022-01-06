@@ -3,59 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
 
-from .base_model import BaseModel
-
-class Model(BaseModel):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-    
-
-    def prepare(self):
-        teacher, student, tokenizer = super().prepare()
-        teacher = to_distill(teacher)
-        student = to_distill(student)
-        return teacher, student, tokenizer
-
-
-    def step(self, batch, phase):
-        teacher_outputs = self.teacher(**batch)
-        student_outputs = self.student(**batch)
-
-        teacher_qkv = get_qkvs(self.teacher)[self.hparams.teacher_layer_index] # (batch, head, seq, head_dim)
-        student_qkv = get_qkvs(self.student)[self.hparams.student_layer_index] # (batch, head, seq, head_dim)
-
-        loss_q = minilm_loss(teacher_qkv['q'], student_qkv['q'], self.hparams.num_relation_heads, batch.attention_mask, self.hparams.temperature)
-        loss_k = minilm_loss(teacher_qkv['k'], student_qkv['k'], self.hparams.num_relation_heads, batch.attention_mask, self.hparams.temperature)
-        loss_v = minilm_loss(teacher_qkv['v'], student_qkv['v'], self.hparams.num_relation_heads, batch.attention_mask, self.hparams.temperature)
-        loss = loss_q + loss_k + loss_v
-
-        log = {f'{phase}/loss': loss, f'{phase}/loss_q': loss_q, f'{phase}/loss_k': loss_k, f'{phase}/loss_v': loss_v}
-        self.log_dict(log, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        return loss
-
-    def training_step(self, batch, batch_idx):
-        return self.step(batch, 'train')
-
-    def validation_step(self, batch, batch_idx):
-        return self.step(batch, 'valid')
-
-    def test_step(self, batch, batch_idx):
-        return self.step(batch, 'test')
-
-
-def to_distill(model):
-    model.base_model.encoder.layer[0].attention.self.__class__._forward = bert_self_attention_forward
-    for layer in model.base_model.encoder.layer:
-        layer.attention.self.forward = layer.attention.self._forward
-    return model
-
-
-def get_qkvs(model):
-    attns = [l.attention.self for l in model.base_model.encoder.layer]
-    qkvs = [{'q': a.q, 'k': a.k, 'v': a.v} for a in attns]    
-    return qkvs
 
 
 def transpose_for_scores(h, num_heads):
@@ -91,11 +39,24 @@ def kl_div_loss(s, t, temperature):
     return F.kl_div(s, t, reduction='batchmean')
 
 
-def minilm_loss(t, s, num_relation_heads, attention_mask=None, temperature=1.0):
-    attn_t = attention(t, t, num_relation_heads, attention_mask)
-    attn_s = attention(s, s, num_relation_heads, attention_mask)
+def minilm_loss(t, s, num_heads, attention_mask=None, temperature=1.0):
+    attn_t = attention(t, t, num_heads, attention_mask)
+    attn_s = attention(s, s, num_heads, attention_mask)
     loss = kl_div_loss(attn_s, attn_t, temperature=temperature)
     return loss
+
+
+def to_distill(model):
+    model.base_model.encoder.layer[0].attention.self.__class__._forward = bert_self_attention_forward
+    for layer in model.base_model.encoder.layer:
+        layer.attention.self.forward = layer.attention.self._forward
+    return model
+
+
+def get_qkvs(model):
+    attns = [l.attention.self for l in model.base_model.encoder.layer]
+    qkvs = [{'q': a.q, 'k': a.k, 'v': a.v} for a in attns]    
+    return qkvs
 
 
 def bert_self_attention_forward(

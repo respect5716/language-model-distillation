@@ -2,7 +2,7 @@
 working_dir: ${hydra:runtime.cwd}
 save_dir: ${working_dir}/transformers
 data_dir: ${working_dir}/data
-model_name_or_path: klue/roberta-large
+model_name_or_path: klue/bert-base
 
 
 data:
@@ -56,8 +56,8 @@ scheduler:
 
 train:
   num_train_steps: 100000
-  num_relation_heads: 32
-  teacher_layer_index: 23
+  num_relation_heads: 24
+  teacher_layer_index: -1
   student_layer_index: -1
 
 

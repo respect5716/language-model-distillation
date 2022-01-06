@@ -114,11 +114,9 @@ class Lite(LightningLite):
 
             if self.is_global_zero:
                 wandb.log({'loss': loss, 'loss_q': loss_q, 'loss_k': loss_k, 'loss_v': loss_v})
-
-
-            if st + 1 % 10000 == 0:
-                stduent.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
-                tokenizer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
+                if (st + 1) % 10000 == 0:
+                    student.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
+                    tokenizer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
 
 
 @hydra.main(config_path='conf', config_name='minilmv2')

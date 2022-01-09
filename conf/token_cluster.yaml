@@ -2,12 +2,12 @@
 working_dir: ${hydra:runtime.cwd}
 save_dir: ${working_dir}/transformers
 data_dir: ${working_dir}/data
-model_name_or_path: klue/bert-base
+model_name_or_path: bert-base-uncased
 
 
 data:
   batch_size: 8
-  lang: ko
+  lang: en
   files:
     ko:
       - namuwiki
@@ -56,9 +56,10 @@ scheduler:
 
 train:
   num_train_steps: 100000
-  num_relation_heads: 24
-  teacher_layer_index: -1
-  student_layer_index: -1
+  num_clusters: 1000
+  db_size: 100000
+  db_path: db.npy
+  temperature: 1.0
 
 
 lite:

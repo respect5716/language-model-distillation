@@ -2,7 +2,7 @@ import os
 import faiss
 import hydra
 import wandb
-import deepspeed
+import shutil
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -43,20 +43,25 @@ def prepare_dataset(config, tokenizer):
 
 @hydra.main(config_path='conf', config_name='token_cluster')
 def main(config: DictConfig):
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path)
-    dataset = prepare_dataset(config, tokenizer)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
-    batch = next(iter(dataloader))
-
-    model = AutoModel.from_pretrained(**config.teacher)
-    _ = model.cuda().eval()
-    for param in model.parameters():
-        param.requires_grad = False
+    centroids_dir = os.path.join(config.working_dir, 'centroids')
+    if os.path.isdir(centroids_dir):
+        shutil.rmtree(centroids_dir)
+    os.makedirs(centroids_dir)
 
     db_path = os.path.join(config.working_dir, config.train.db_path)
     if os.path.isfile(db_path):
         db = np.load(db_path)
     else:
+        tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path)
+        dataset = prepare_dataset(config, tokenizer)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
+        batch = next(iter(dataloader))
+
+        model = AutoModel.from_pretrained(**config.teacher)
+        _ = model.cuda().eval()
+        for param in model.parameters():
+            param.requires_grad = False
+
         db = []
         for st, batch in tqdm(enumerate(dataloader)):
             batch = {k:v.to(model.device) for k,v in batch.items()}
@@ -74,9 +79,13 @@ def main(config: DictConfig):
             np.save('db.npy', db)
     
     print('DB size: ', db.shape)
-    kmeans = faiss.Kmeans(db.shape[1], config.train.num_clusters, niter=10, nredo=5, spherical=True, verbose=True, gpu=True)
-    kmeans.train(db)
-    np.save(os.path.join(config.working_dir, 'centroids.npy'), kmeans.centroids)
+    
+    cluster_dim = db.shape[1] // config.train.num_sections
+    for i in range(config.train.num_sections):
+        kmeans = faiss.Kmeans(cluster_dim, config.train.num_clusters, niter=30, nredo=5, spherical=True, verbose=True, gpu=True)
+        X = db[:, i*cluster_dim:(i+1)*cluster_dim]
+        kmeans.train(np.ascontiguousarray(X))
+        np.save(os.path.join(centroids_dir, f'centroids_{i:02d}.npy'), kmeans.centroids)
 
 
 if __name__ == '__main__':

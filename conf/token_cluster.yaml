@@ -56,10 +56,12 @@ scheduler:
 
 train:
   num_train_steps: 100000
-  num_clusters: 1000
+  num_clusters: 100
+  num_sections: 48
   db_size: 100000
   db_path: db.npy
-  temperature: 1.0
+  temperature: 2.0
+  alpha: 5.0
 
 
 lite:

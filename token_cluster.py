@@ -39,18 +39,58 @@ def prepare_dataset(config, tokenizer):
     return dataset
 
 
-def prepare_model(config):
-    teacher = AutoModel.from_pretrained(**config.teacher)
-    for param in teacher.parameters():
-        param.requires_grad = False
+class Classifier(nn.Module):
+    def __init__(self, input_dim, num_labels, dropout_prob):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, num_labels)
+        self.dropout = nn.Dropout(dropout_prob)
 
-    cfg = AutoConfig.from_pretrained(**config.student)
-    cfg.num_labels = config.train.num_clusters
-    student = AutoModelForTokenClassification.from_config(cfg)
+    def forward(self, x):
+        return self.linear(self.dropout(x))
 
-    teacher.eval()
-    student.train()
-    return teacher, student
+
+class Student(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        cfg = AutoConfig.from_pretrained(**config.student)
+        cfg.num_labels = config.train.num_clusters
+        self.transformer = AutoModel.from_config(cfg)
+        self.classifiers = nn.ModuleList([
+            Classifier(config.student.hidden_size, config.train.num_clusters, config.student.hidden_dropout_prob)
+            for _ in range(config.train.num_sections)    
+        ])
+
+    def forward(self, batch):
+        out = self.transformer(**batch)
+        out = out.last_hidden_state
+        out = [cl(out) for cl in self.classifiers]
+        out = [o.view(-1, self.config.train.num_clusters) for o in out]
+        return out
+
+
+class Teacher(nn.Module):
+    def __init__(self, centroids, config):
+        super().__init__()
+        self.config = config
+        self.centroids = centroids
+        self.transformer = AutoModel.from_pretrained(**config.teacher)
+        for param in self.transformer.parameters():
+            param.requires_grad = False
+
+        self.cluster_dim = self.transformer.config.hidden_size // config.train.num_sections
+
+    def forward(self, batch):
+        out = self.transformer(**batch)
+        out = out.last_hidden_state
+        out = out.view(-1, out.size(-1))
+
+        logits = []
+        for idx, cent in enumerate(self.centroids):
+            X = out[:, idx*self.cluster_dim:(idx+1)*self.cluster_dim]
+            logits.append(torch.mm(X, cent.T))
+        return logits
+
 
 class Model(nn.Module):
     def __init__(self, teacher, student):
@@ -59,8 +99,8 @@ class Model(nn.Module):
         self.student = student
     
     def forward(self, batch):
-        teacher_outputs = self.teacher(**batch)
-        student_outputs = self.student(**batch)
+        teacher_outputs = self.teacher(batch)
+        student_outputs = self.student(batch)
         return teacher_outputs, student_outputs
 
 
@@ -79,18 +119,19 @@ class Lite(LightningLite):
             for k, v in batch.items():
                 print(k, v.size())
 
+        centroids = [np.load(os.path.join(config.working_dir, 'centroids', f'centroids_{i:02d}.npy')) for i in range(config.train.num_sections)]
+        centroids = [torch.tensor(cent).to(self.device) for cent in centroids]
 
-        teacher, student = prepare_model(config)
+        teacher = Teacher(centroids, config)
+        student = Student(config)
         model = Model(teacher, student)
         params = get_param_groups(student, config.optimizer.weight_decay)
         optimizer = prepare_optimizer(params, config.optimizer)
         scheduler = prepare_scheduler(optimizer, config.scheduler)
         model, optimizer = self.setup(model, optimizer)
 
-        centroids = np.load(os.path.join(config.working_dir, 'centroids.npy'))
-        centroids = torch.tensor(centroids).to(self.device)
         if self.is_global_zero:
-            print(centroids.size())
+            print(centroids[0].size())
         
         pbar = tqdm(range(config.train.num_train_steps))
         loader = iter(dataloader)
@@ -101,13 +142,11 @@ class Lite(LightningLite):
                 loader = iter(dataloader)
                 batch = next(loader)
             batch = {k:v.to(self.device) for k,v in batch.items()}
-            to, so = model(batch)
+            teacher_logits, student_logits = model(batch)
 
-            th = to.last_hidden_state
-            th = th.view(-1, th.size(-1))
-            teacher_logits = torch.mm(th, centroids.T)
-            student_logits = so.logits.view(-1, logits.size(-1))
-            loss = kl_div_loss(student_logits, teacher_logits, config.train.temperature)
+            loss = 0.
+            for tl, sl in zip(teacher_logits, student_logits):
+                loss += kl_div_loss(sl, tl, config.train.temperature) * config.train.alpha
 
             optimizer.zero_grad()
             self.backward(loss)
@@ -117,7 +156,7 @@ class Lite(LightningLite):
             if self.is_global_zero:
                 wandb.log({'loss': loss})
                 if (st + 1) % 10000 == 0:
-                    student.base_model.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
+                    student.transformer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
                     tokenizer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
 
 

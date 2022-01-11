@@ -6,3 +6,4 @@ transformers
 data/*
 !data/.gitkeep
 *.npy
+kmeans

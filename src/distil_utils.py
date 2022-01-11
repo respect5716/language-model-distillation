@@ -36,7 +36,7 @@ def kl_div_loss(s, t, temperature):
 
     s = F.log_softmax(s / temperature, dim=-1)
     t = F.softmax(t / temperature, dim=-1)
-    return F.kl_div(s, t, reduction='batchmean')
+    return F.kl_div(s, t, reduction='batchmean') * (temperature ** 2) 
 
 
 def minilm_loss(t, s, num_heads, attention_mask=None, temperature=1.0):

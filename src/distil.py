@@ -14,7 +14,7 @@ def transpose_for_scores(h, num_heads):
 
 
 def attention(h1, h2, num_heads, attention_mask=None):
-    assert h1.size() == h2.size()
+    # assert h1.size() == h2.size()
     head_size = h1.size(-1) // num_heads
     h1 = transpose_for_scores(h1, num_heads) # (batch, num_heads, seq_length, head_size)
     h2 = transpose_for_scores(h2, num_heads) # (batch, num_heads, seq_length, head_size)

@@ -56,13 +56,17 @@ scheduler:
 
 train:
   num_train_steps: 100000
-  num_clusters: 1000
+  num_clusters: 3000
   niter: 30
   nredo: 1
   spherical: true
   db_size: 100000
   db_path: db.npy
   temperature: 1.
+  global_alpha: 5.
+  local_alpha: 100.
+  local_k: 100
+  num_local_heads: 24
 
 
 lite:

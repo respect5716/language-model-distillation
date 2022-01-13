@@ -18,27 +18,30 @@ from transformers import AutoConfig, AutoTokenizer, AutoModel, AutoModelForToken
 from transformers import BatchEncoding
 from datasets import load_dataset, concatenate_datasets
 
-from src.distil_utils import kl_div_loss
-from src.model_utils import get_param_groups, prepare_optimizer, prepare_scheduler
-from src.data_utils import prepare_dataset
+from src.data import prepare_dataset
+from src.model import get_param_groups, prepare_optimizer, prepare_scheduler
+from src.distil import kl_div_loss, attention
+
+
 
 class Student(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         cfg = AutoConfig.from_pretrained(**config.student)
-        cfg.num_labels = config.train.num_clusters
-        self.transformer = AutoModelForTokenClassification.from_config(cfg)
+        self.transformer = AutoModel.from_config(cfg)
+        self.centroids = nn.Parameter(torch.rand(config.train.num_clusters, config.student.hidden_size))
 
     def forward(self, batch):
         out = self.transformer(**batch)
-        return out.logits
+        out = out.last_hidden_state
+        return out
 
 
 class Teacher(nn.Module):
-    def __init__(self, kmeans, avg, config):
+    def __init__(self, centroids, avg, config):
         super().__init__()
-        self.kmeans = kmeans
+        self.centroids = centroids
         self.avg = avg
         self.config = config
         self.transformer = AutoModel.from_pretrained(**config.teacher)
@@ -48,24 +51,8 @@ class Teacher(nn.Module):
     def forward(self, batch):
         out = self.transformer(**batch)
         out = out.last_hidden_state
-        out = out.view(-1, out.size(-1))
         out -= self.avg
-
-        D, I = self.kmeans.search(out.cpu().numpy(), self.config.train.num_clusters)
-        logits = torch.tensor(D).to(batch['input_ids'].device)
-        return logits if self.config.train.spherical else -logits
-
-
-class Model(nn.Module):
-    def __init__(self, teacher, student):
-        super().__init__()
-        self.teacher = teacher
-        self.student = student
-    
-    def forward(self, batch):
-        teacher_outputs = self.teacher(batch)
-        student_outputs = self.student(batch)
-        return teacher_outputs, student_outputs
+        return out
 
 
 class Lite(LightningLite):
@@ -78,47 +65,74 @@ class Lite(LightningLite):
         dataset = prepare_dataset(config, tokenizer)
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=config.data.batch_size, shuffle=True)
         
-        kmeans = faiss.read_index(os.path.join(config.working_dir, 'kmeans'))
-        avg = np.load(os.path.join(config.working_dir, 'avg.npy'))
-        avg = torch.tensor(avg).to(self.device)
+        centroids = faiss.read_index(os.path.join(config.working_dir, 'kmeans'))
+        centroids = [centroids.reconstruct(i) for i in range(config.train.num_clusters)]
+        centroids = torch.tensor(np.stack(centroids, axis=0)).to(self.device)
 
-        teacher = Teacher(kmeans, avg, config)
+        avg = np.load(os.path.join(config.working_dir, 'avg.npy'))
+        avg = torch.tensor(avg).unsqueeze(0).to(self.device) # (1, 1, dim)
+
+        teacher = Teacher(centroids, avg, config).to(self.device)
         student = Student(config)
-        model = Model(teacher, student)
         wandb.watch(student, log='gradients', log_freq=10)
 
         params = get_param_groups(student, config.optimizer.weight_decay)
         optimizer = prepare_optimizer(params, config.optimizer)
         scheduler = prepare_scheduler(optimizer, config.scheduler)
-        model, optimizer = self.setup(model, optimizer)
+        _, optimizer = self.setup(student, optimizer)
         
+        dataiter = iter(dataloader)
         pbar = tqdm(range(config.train.num_train_steps))
-        loader = iter(dataloader)
         for st in pbar:
             try:
-                batch = next(loader)
-            except:
-                loader = iter(dataloader)
-                batch = next(loader)
+                batch = next(dataiter)
+            except StopIteration:
+                dataiter = iter(dataloader)
+                batch = next(dataiter)
             batch = {k:v.to(self.device) for k,v in batch.items()}
-            teacher_logits, student_logits = model(batch)
-            loss = kl_div_loss(student_logits, teacher_logits, config.train.temperature)
+
+            out_t = teacher(batch) # (batch, seq, dim_t)
+            out_s = student(batch) # (batch, seq, dim_s)
+
+            out_t = out_t.view(-1, out_t.size(-1)) # (batch*seq, dim_t)
+            out_s = out_s.view(-1, out_s.size(-1)) # (batch*seq, dim_s)
             
+            score_t = torch.matmul(out_t, teacher.centroids.T) # (batch*seq, num_clusters)
+            score_s = torch.matmul(out_s, student.centroids.T) # (batch*seq, num_clusters)
+            global_loss = kl_div_loss(score_s, score_t, config.train.temperature)
+
+            ranking = torch.argsort(-score_t, dim=-1) # (batch*seq, num_clusters)
+            local_idxs = ranking[:, :config.train.local_k] # (batch*seq, local_k)
+
+            local_out_t = out_t.unsqueeze(1) # (batch*seq, 1, dim)
+            local_out_s = out_s.unsqueeze(1) # (batch*seq, 1, dim)
+
+            local_centroids_t = teacher.centroids[local_idxs] # (batch*seq, local_k, dim_t)
+            local_centroids_s = student.centroids[local_idxs] # (batch*seq, local_k, dim_s)
+
+
+            attn_t = attention(local_out_t, local_centroids_t, config.train.num_local_heads) # (batch*seq, num_head, 1, local_k)
+            attn_s = attention(local_out_s, local_centroids_s, config.train.num_local_heads) # (batch*seq, num_head, 1, local_k)
+            local_loss = kl_div_loss(attn_s, attn_t, config.train.temperature)
+
+            loss = global_loss * config.train.global_alpha + local_loss * config.train.local_alpha
+
             optimizer.zero_grad()
             self.backward(loss)
             optimizer.step()
             scheduler.step()
 
             if self.is_global_zero:
-                wandb.log({'loss': loss})
+                wandb.log({'loss': loss, 'global_loss': global_loss, 'local_loss': local_loss})
                 if (st + 1) % 10000 == 0:
-                    student.transformer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
+                    student.transformer.base_model.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
                     tokenizer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
 
 
 @hydra.main(config_path='conf', config_name='token_cluster')
 def main(config: DictConfig):
     Lite(**config.lite).run(config)
+
 
 if __name__ == '__main__':
     main()

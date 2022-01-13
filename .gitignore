@@ -7,3 +7,4 @@ data/*
 !data/.gitkeep
 *.npy
 kmeans
+nohup.out

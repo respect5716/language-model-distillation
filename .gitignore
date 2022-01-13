@@ -8,3 +8,4 @@ data/*
 *.npy
 kmeans
 nohup.out
+notebook

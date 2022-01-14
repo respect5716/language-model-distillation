@@ -12,14 +12,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from pytorch_lightning.lite import LightningLite
 
-from transformers import AutoConfig, AutoTokenizer, AutoModel, AutoModelForTokenClassification
-from transformers import BatchEncoding
-
-from src.distil_utils import to_distill, minilm_loss, get_qkvs
-from src.model_utils import get_param_groups, prepare_optimizer, prepare_scheduler
-from src.data_utils import prepare_dataset
+from transformers import AutoConfig, AutoTokenizer, AutoModel
+from src.data import prepare_dataset
 
 
 
@@ -29,7 +24,7 @@ def main(config: DictConfig):
     if not os.path.isfile(db_path):
         tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path)
         dataset = prepare_dataset(config, tokenizer)
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
         batch = next(iter(dataloader))
 
         model = AutoModel.from_pretrained(**config.teacher)
@@ -48,10 +43,10 @@ def main(config: DictConfig):
             
             if len(db) >= config.train.db_size:
                 break
-        
-            db = torch.cat(db, dim=0)
-            db = db.numpy()
-            np.save('db.npy', db)
+
+        db = db[:config.train.db_size]
+        db = torch.cat(db, dim=0).numpy()
+        np.save(os.path.join(config.working_dir, 'db.npy'), db)
 
     db = np.load(db_path)
     avg = db.mean(axis=0, keepdims=True)

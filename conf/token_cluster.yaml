@@ -2,12 +2,12 @@
 working_dir: ${hydra:runtime.cwd}
 save_dir: ${working_dir}/transformers
 data_dir: ${working_dir}/data
-model_name_or_path: bert-base-uncased
+model_name_or_path: klue/bert-base
 
 
 data:
   batch_size: 8
-  lang: en
+  lang: ko
   files:
     ko:
       - namuwiki

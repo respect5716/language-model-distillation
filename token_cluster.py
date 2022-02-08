@@ -20,7 +20,7 @@ from datasets import load_dataset, concatenate_datasets
 
 from src.data import prepare_dataset
 from src.model import get_param_groups, prepare_optimizer, prepare_scheduler
-from src.distil import kl_div_loss, attention
+from src.distil import scaled_dot_product, kl_div_loss, attention
 
 
 
@@ -74,7 +74,9 @@ class Lite(LightningLite):
 
         teacher = Teacher(centroids, avg, config).to(self.device)
         student = Student(config)
-        wandb.watch(student, log='gradients', log_freq=10)
+
+        if self.is_global_zero:
+            wandb.watch(student, log='gradients', log_freq=10)
 
         params = get_param_groups(student, config.optimizer.weight_decay)
         optimizer = prepare_optimizer(params, config.optimizer)
@@ -94,28 +96,33 @@ class Lite(LightningLite):
             out_t = teacher(batch) # (batch, seq, dim_t)
             out_s = student(batch) # (batch, seq, dim_s)
 
-            out_t = out_t.view(-1, out_t.size(-1)) # (batch*seq, dim_t)
-            out_s = out_s.view(-1, out_s.size(-1)) # (batch*seq, dim_s)
+            out_t_flt = out_t.view(-1, out_t.size(-1)) # (batch*seq, dim_t)
+            out_s_flt = out_s.view(-1, out_s.size(-1)) # (batch*seq, dim_s)
             
-            score_t = torch.matmul(out_t, teacher.centroids.T) # (batch*seq, num_clusters)
-            score_s = torch.matmul(out_s, student.centroids.T) # (batch*seq, num_clusters)
-            global_loss = kl_div_loss(score_s, score_t, config.train.temperature)
+            score_t = scaled_dot_product(out_t_flt, teacher.centroids) # (batch*seq, num_clusters)
+            score_s = scaled_dot_product(out_s_flt, student.centroids) # (batch*seq, num_clusters)
 
-            ranking = torch.argsort(-score_t, dim=-1) # (batch*seq, num_clusters)
-            local_idxs = ranking[:, :config.train.local_k] # (batch*seq, local_k)
+            inverse_score_t = scaled_dot_product(teacher.centroids, out_t)
+            inverse_score_s = scaled_dot_product(student.centroids, out_s)
 
-            local_out_t = out_t.unsqueeze(1) # (batch*seq, 1, dim)
-            local_out_s = out_s.unsqueeze(1) # (batch*seq, 1, dim)
+            # ranking = torch.argsort(-score_t, dim=-1) # (batch*seq, num_clusters)
+            # local_idxs = ranking[:, :config.train.local_k] # (batch*seq, local_k)
 
-            local_centroids_t = teacher.centroids[local_idxs] # (batch*seq, local_k, dim_t)
-            local_centroids_s = student.centroids[local_idxs] # (batch*seq, local_k, dim_s)
+            # local_out_t = out_t.unsqueeze(1) # (batch*seq, 1, dim)
+            # local_out_s = out_s.unsqueeze(1) # (batch*seq, 1, dim)
+
+            # local_centroids_t = teacher.centroids[local_idxs] # (batch*seq, local_k, dim_t)
+            # local_centroids_s = student.centroids[local_idxs] # (batch*seq, local_k, dim_s)
 
 
-            attn_t = attention(local_out_t, local_centroids_t, config.train.num_local_heads) # (batch*seq, num_head, 1, local_k)
-            attn_s = attention(local_out_s, local_centroids_s, config.train.num_local_heads) # (batch*seq, num_head, 1, local_k)
-            local_loss = kl_div_loss(attn_s, attn_t, config.train.temperature)
+            # attn_t = attention(local_out_t, local_centroids_t, config.train.num_local_heads) # (batch*seq, num_head, 1, local_k)
+            # attn_s = attention(local_out_s, local_centroids_s, config.train.num_local_heads) # (batch*seq, num_head, 1, local_k)
+            # local_loss = kl_div_loss(attn_s, attn_t, config.train.temperature)
 
-            loss = global_loss * config.train.global_alpha + local_loss * config.train.local_alpha
+            cent_loss = kl_div_loss(score_s, score_t, config.train.temperature)
+            inverse_loss = kl_div_loss(inverse_score_s, inverse_score_t, config.train.temperature)
+            loss = cent_loss + inverse_loss
+            loss *= 100
 
             optimizer.zero_grad()
             self.backward(loss)
@@ -123,7 +130,7 @@ class Lite(LightningLite):
             scheduler.step()
 
             if self.is_global_zero:
-                wandb.log({'loss': loss, 'global_loss': global_loss, 'local_loss': local_loss})
+                wandb.log({'loss': loss, 'cent_loss': cent_loss, 'inverse_loss': inverse_loss})
                 if (st + 1) % 10000 == 0:
                     student.transformer.base_model.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
                     tokenizer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))

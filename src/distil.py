@@ -5,6 +5,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def margin_loss(s, t, k):
+    if k is None:
+        k = t.size(-1)
+    tsorted, trank = torch.topk(t, dim=-1, k=k)
+    ssorted = torch.gather(s, 1, trank)
+    tdiff = tsorted[:,:-1] - tsorted[:, 1:]
+    sdiff = ssorted[:,:-1] - ssorted[:, 1:]
+
+    margin_loss = torch.relu(tdiff-sdiff).mean()
+    return margin_loss
+
+
+def scaled_dot_product(a, b):
+    return torch.matmul(a, b.transpose(-1, -2)) / a.size(-1)
+
 
 def transpose_for_scores(h, num_heads):
     batch_size, seq_length, dim = h.size()
@@ -36,7 +51,8 @@ def kl_div_loss(s, t, temperature):
 
     s = F.log_softmax(s / temperature, dim=-1)
     t = F.softmax(t / temperature, dim=-1)
-    return F.kl_div(s, t, reduction='batchmean') * (temperature ** 2) 
+    return F.kl_div(s, t, reduction='batchmean') * (temperature ** 2)
+    # return F.kl_div(s, t, reduction='batchmean') 
 
 
 def minilm_loss(t, s, num_heads, attention_mask=None, temperature=1.0):
@@ -48,8 +64,15 @@ def minilm_loss(t, s, num_heads, attention_mask=None, temperature=1.0):
 
 def to_distill(model):
     model.base_model.encoder.layer[0].attention.self.__class__._forward = bert_self_attention_forward
+    model.base_model.encoder.layer[0].attention.output.__class__._forward = bert_self_output_forward
+    model.base_model.encoder.layer[0].intermediate.__class__._forward = bert_intermediate_forward
+    model.base_model.encoder.layer[0].output.__class__._forward = bert_output_forward
+
     for layer in model.base_model.encoder.layer:
         layer.attention.self.forward = layer.attention.self._forward
+        layer.attention.output.forward = layer.attention.output._forward
+        layer.intermediate.forward = layer.intermediate._forward
+        layer.output.forward = layer.output._forward
     return model
 
 
@@ -58,6 +81,16 @@ def get_qkvs(model):
     qkvs = [{'q': a.q, 'k': a.k, 'v': a.v} for a in attns]    
     return qkvs
 
+def get_feat(model, layer_idx):
+    feat = []
+    layer = model.base_model.encoder.layer[layer_idx]
+    feat.append(layer.attention.self.q)
+    feat.append(layer.attention.self.k)
+    feat.append(layer.attention.self.v)
+    feat.append(layer.attention.output.h)
+    feat.append(layer.intermediate.h)
+    feat.append(layer.output.h)
+    return feat
 
 def bert_self_attention_forward(
     self,
@@ -117,8 +150,32 @@ def bert_self_attention_forward(
     context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
     new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
     context_layer = context_layer.view(*new_context_layer_shape)
+    self.o = context_layer
 
     outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
     if self.is_decoder:
         outputs = outputs + (past_key_value,)
     return outputs
+
+
+def bert_self_output_forward(self, hidden_states, input_tensor):
+    hidden_states = self.dense(hidden_states)
+    self.h = hidden_states
+    hidden_states = self.dropout(hidden_states)
+    hidden_states = self.LayerNorm(hidden_states + input_tensor)
+    return hidden_states
+
+
+def bert_intermediate_forward(self, hidden_states):
+    hidden_states = self.dense(hidden_states)
+    self.h= hidden_states
+    hidden_states = self.intermediate_act_fn(hidden_states)
+    return hidden_states
+
+
+def bert_output_forward(self, hidden_states, input_tensor):
+    hidden_states = self.dense(hidden_states)
+    self.h = hidden_states
+    hidden_states = self.dropout(hidden_states)
+    hidden_states = self.LayerNorm(hidden_states + input_tensor)
+    return hidden_states

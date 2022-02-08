@@ -45,28 +45,19 @@ optimizer:
   betas:
     - 0.9
     - 0.98
-  weight_decay: 0.01
+  weight_decay: 0.05
 
 
 scheduler:
   name: linear
   num_train_steps: ${train.num_train_steps}
-  warmup_ratio: 0.05
+  warmup_ratio: 0.01
 
 
 train:
   num_train_steps: 100000
-  num_clusters: 3000
-  niter: 30
-  nredo: 1
-  spherical: true
-  db_size: 100000
-  db_path: db.npy
-  temperature: 0.01
-  global_alpha: 5.
-  local_alpha: 100.
-  local_k: 100
-  num_local_heads: 24
+  temperature: 1.
+  margin: 5
 
 
 lite:

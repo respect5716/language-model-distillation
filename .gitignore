@@ -1,7 +1,7 @@
 outputs
 __pycache__
 .ipynb_checkpoints
-
+wandb
 transformers
 data/*
 !data/.gitkeep
@@ -9,3 +9,4 @@ data/*
 kmeans
 nohup.out
 notebook
+*.pt

@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.lite import LightningLite
 
 from transformers import AutoConfig, AutoTokenizer, AutoModel
-from transformers import BatchEncoding
+from transformers import BatchEncoding, DataCollatorForLanguageModeling
 from datasets import load_dataset, concatenate_datasets
 
 from src.data import prepare_dataset
@@ -35,17 +35,6 @@ def prepare_model(config):
     student.train()
     return teacher, student
 
-class Model(nn.Module):
-    def __init__(self, teacher, student):
-        super().__init__()
-        self.teacher = teacher
-        self.student = student
-    
-    def forward(self, batch):
-        teacher_outputs = self.teacher(**batch)
-        student_outputs = self.student(**batch)
-        return {'teacher': teacher_outputs, 'student': student_outputs}
-
 
 class Lite(LightningLite):
     def run(self, config):
@@ -54,7 +43,8 @@ class Lite(LightningLite):
             wandb.init(project='language-model-distillation', config=config)
         
         tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path)
-        dataset = prepare_dataset(config, tokenizer)
+        collator = DataCollatorForLanguageModeling(tokenizer, mlm=True)
+        dataset = prepare_dataset(config, tokenizer, collator)
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=config.data.batch_size, shuffle=True)
 
         if self.is_global_zero:
@@ -62,24 +52,29 @@ class Lite(LightningLite):
             for k, v in batch.items():
                 print(k, v.size())
 
-
         teacher, student = prepare_model(config)
-        model = Model(teacher, student)
+        if self.is_global_zero:
+            wandb.watch(student, log='gradients', log_freq=10)
+
         params = get_param_groups(student, config.optimizer.weight_decay)
         optimizer = prepare_optimizer(params, config.optimizer)
         scheduler = prepare_scheduler(optimizer, config.scheduler)
-        model, optimizer = self.setup(model, optimizer)
+        _, optimizer = self.setup(student, optimizer)
+        _ = teacher.to(self.device)
+
         
+        dataiter = iter(dataloader)
         pbar = tqdm(range(config.train.num_train_steps))
-        loader = iter(dataloader)
         for st in pbar:
             try:
-                batch = next(loader)
-            except:
-                loader = iter(dataloader)
-                batch = next(loader)
-            batch = {k:v.to(self.device) for k,v in batch.items()}
-            _ = model(batch)
+                batch = next(dataiter)
+            except StopIteration:
+                dataiter = iter(dataloader)
+                batch = next(dataiter)
+            batch = BatchEncoding(batch).to(self.device)
+
+            tout = teacher.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
+            sout = student.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
 
             teacher_qkv = get_qkvs(teacher)[config.train.teacher_layer_index] # (batch, head, seq, head_dim)
             student_qkv = get_qkvs(student)[config.train.student_layer_index] # (batch, head, seq, head_dim)
@@ -93,7 +88,6 @@ class Lite(LightningLite):
             self.backward(loss)
             optimizer.step()
             scheduler.step()
-
 
             if self.is_global_zero:
                 wandb.log({'loss': loss, 'loss_q': loss_q, 'loss_k': loss_k, 'loss_v': loss_v})

@@ -12,12 +12,12 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from pytorch_lightning.lite import LightningLite
 
-from transformers import AutoConfig, AutoTokenizer, AutoModel
+from transformers import AutoConfig, AutoTokenizer, AutoModelForMaskedLM
 from transformers import BatchEncoding, DataCollatorForLanguageModeling
 from datasets import load_dataset, concatenate_datasets
 
 from src.data import prepare_dataset
-from src.distil import to_distill, minilm_loss, get_qkvs
+from src.distil import kl_div_loss, to_distill
 from src.model import get_param_groups, prepare_optimizer, prepare_scheduler
 
 
@@ -31,6 +31,7 @@ def prepare_model(config):
 
     teacher = to_distill(teacher)
     student = to_distill(student)
+
     teacher.eval()
     student.train()
     return teacher, student
@@ -76,20 +77,26 @@ class Lite(LightningLite):
             to = teacher.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
             so = student.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
 
-            teacher_qkv = get_qkvs(teacher)[config.train.teacher_layer_index] # (batch, head, seq, head_dim)
-            student_qkv = get_qkvs(student)[config.train.student_layer_index] # (batch, head, seq, head_dim)
+            tqkv = get_qkvs(teacher)[config.train.teacher_layer_index] # (batch, head, seq, head_dim)
+            sqkv = get_qkvs(student)[config.train.student_layer_index] # (batch, head, seq, head_dim)
 
-            loss_q = minilm_loss(student_qkv['q'], teacher_qkv['q'], config.train.num_relation_heads)
-            loss_k = minilm_loss(student_qkv['k'], teacher_qkv['k'], config.train.num_relation_heads)
-            loss_v = minilm_loss(student_qkv['v'], teacher_qkv['v'], config.train.num_relation_heads)
-            loss = loss_q + loss_k + loss_v
+            tq, tk = tqkv['q'], tqkv['k']
+
+            loss = 0.
+            if config.train.alpha_mlm > 0:
+                mlm_loss = so.loss
+                loss += config.train.alpha_mlm * mlm_loss
+
+            if config.train.alpha_distil > 0:
+                distil_loss = kl_div_loss(so.logits, to.logits, config.train.temperature)
+                loss += config.train.alpha_distil * distil_loss
 
             optimizer.zero_grad()
             self.backward(loss)
             optimizer.step()
             scheduler.step()
 
-            log = {'loss': loss.item(), 'loss_q': loss_q.item(), 'loss_k': loss_k.item(), 'loss_v': loss_v.item()}
+            log = {'loss': loss.item(), 'mlm_loss': mlm_loss.item(), 'distil_loss': distil_loss.item()}
             if config.debug:
                 print(log)
                 break
@@ -101,7 +108,7 @@ class Lite(LightningLite):
                     tokenizer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
 
 
-@hydra.main(config_path='conf', config_name='minilmv2')
+@hydra.main(config_path='conf', config_name='mlm')
 def main(config: DictConfig):
     Lite(**config.lite).run(config)
 

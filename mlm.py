@@ -51,7 +51,7 @@ class Lite(LightningLite):
 
         teacher, student = prepare_model(config)
         if self.is_global_zero and not config.debug:
-            wandb.init(project='language-model-distillation', config=config)
+            wandb.init(project='language-model-distillation', config=OmegaConf.to_container(config))
             wandb.watch(student, log='gradients', log_freq=10)
 
         params = get_param_groups(student, config.optimizer.weight_decay)

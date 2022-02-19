@@ -3,7 +3,6 @@ defaults:
   - _self_
 
 train:
-  num_train_steps: 100000
   temperature: 2.
   alpha_mlm: 2.
   alpha_distil: 1.

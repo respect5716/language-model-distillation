@@ -1,0 +1,7 @@
+model_name_or_path: klue-roberta-base
+atasets:
+   - modu-newspaper.txt
+   - modu-spoken.txt
+   - modu-written.txt
+   - namuwiki.txt
+

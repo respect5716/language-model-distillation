@@ -21,8 +21,8 @@ def transform(batch, tokenizer, collator):
 
 def prepare_dataset(config, tokenizer, collator=None):
     dataset = []
-    for fname in config.data.files[config.data.lang]:
-        _dataset = load_dataset('text', data_files=os.path.join(config.data_dir, f'{fname}.txt'))['train']
+    for fname in config.lang.datasets:
+        _dataset = load_dataset('text', data_files=os.path.join(config.data_dir, fname))['train']
         dataset.append(_dataset)
     dataset = concatenate_datasets(dataset)
     dataset.set_transform(lambda batch: transform(batch, tokenizer, collator))

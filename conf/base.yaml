@@ -1,22 +1,17 @@
+defaults:
+  - lang:
+    - en
+
+debug: true
 
 working_dir: ${hydra:runtime.cwd}
 save_dir: ${working_dir}/transformers
 data_dir: ${working_dir}/data
-model_name_or_path: klue/bert-base
+model_name_or_path: ${lang.model_name_or_path}
 
 
 data:
   batch_size: 8
-  lang: ko
-  files:
-    ko:
-      - namuwiki
-      - modu-spoken
-      - modu-written
-      - modu-newspaper
-    en:
-      - bookcorpus
-      - wikitext
 
 
 teacher:
@@ -55,13 +50,10 @@ scheduler:
 
 
 train:
-  num_train_steps: 300000
-  num_relation_heads: 24
-  teacher_layer_index: -1
-  student_layer_index: -1
+  num_train_steps: 100000
 
 
 lite:
   gpus: -1
-  strategy: deepspeed
+  strategy: ddp
   precision: 32

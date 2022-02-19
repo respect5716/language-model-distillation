@@ -5,6 +5,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def kl_div_loss(s, t, temperature):
+    if len(s.size()) != 2:
+        s = s.view(-1, s.size(-1))
+        t = t.view(-1, t.size(-1))
+
+    s = F.log_softmax(s / temperature, dim=-1)
+    t = F.softmax(t / temperature, dim=-1)
+    return F.kl_div(s, t, reduction='batchmean') * (temperature ** 2)
+
+
 def margin_loss(s, t, k):
     if k is None:
         k = t.size(-1)
@@ -44,15 +54,7 @@ def attention(h1, h2, num_heads, attention_mask=None):
     return attn
 
 
-def kl_div_loss(s, t, temperature):
-    if len(s.size()) != 2:
-        s = s.view(-1, s.size(-1))
-        t = t.view(-1, t.size(-1))
 
-    s = F.log_softmax(s / temperature, dim=-1)
-    t = F.softmax(t / temperature, dim=-1)
-    return F.kl_div(s, t, reduction='batchmean') * (temperature ** 2)
-    # return F.kl_div(s, t, reduction='batchmean') 
 
 
 def minilm_loss(t, s, num_heads, attention_mask=None, temperature=1.0):

@@ -1,67 +1,9 @@
-
-working_dir: ${hydra:runtime.cwd}
-save_dir: ${working_dir}/transformers
-data_dir: ${working_dir}/data
-model_name_or_path: klue/roberta-base
-
-
-data:
-  batch_size: 8
-  lang: ko
-  files:
-    ko:
-      - namuwiki
-      - modu-spoken
-      - modu-written
-      - modu-newspaper
-    en:
-      - bookcorpus
-      - wikitext
-
-
-teacher:
-  pretrained_model_name_or_path: ${model_name_or_path}
-  hidden_dropout_prob: 0
-  attention_probs_dropout_prob: 0
-  output_attentions: true
-  output_hidden_states: true
-
-
-student:
-  pretrained_model_name_or_path: ${model_name_or_path}
-  num_hidden_layers: 12
-  hidden_size: 192
-  intermediate_size: 768
-  num_attention_heads: 12
-  hidden_dropout_prob: 0.1
-  attention_probs_dropout_prob: 0.1
-  output_attentions: true
-  output_hidden_states: true
-
-
-optimizer:
-  name: adamw
-  lr: 6e-4
-  betas:
-    - 0.9
-    - 0.98
-  weight_decay: 0.01
-
-
-scheduler:
-  name: linear
-  num_train_steps: ${train.num_train_steps}
-  warmup_ratio: 0.05
-
+defaults:
+  - base
+  - _self_
 
 train:
-  num_train_steps: 300000
-  num_relation_heads: 24
-  teacher_layer_index: -1
-  student_layer_index: -1
-
-
-lite:
-  gpus: -1
-  strategy: deepspeed
-  precision: 32
+  num_train_steps: 100000
+  temperature: 2.
+  alpha_mlm: 2.
+  alpha_distil: 1.

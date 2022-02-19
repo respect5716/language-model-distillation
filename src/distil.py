@@ -15,22 +15,6 @@ def kl_div_loss(s, t, temperature):
     return F.kl_div(s, t, reduction='batchmean') * (temperature ** 2)
 
 
-def margin_loss(s, t, k):
-    if k is None:
-        k = t.size(-1)
-    tsorted, trank = torch.topk(t, dim=-1, k=k)
-    ssorted = torch.gather(s, 1, trank)
-    tdiff = tsorted[:,:-1] - tsorted[:, 1:]
-    sdiff = ssorted[:,:-1] - ssorted[:, 1:]
-
-    margin_loss = torch.relu(tdiff-sdiff).mean()
-    return margin_loss
-
-
-def scaled_dot_product(a, b):
-    return torch.matmul(a, b.transpose(-1, -2)) / a.size(-1)
-
-
 def transpose_for_scores(h, num_heads):
     batch_size, seq_length, dim = h.size()
     head_size = dim // num_heads
@@ -54,10 +38,7 @@ def attention(h1, h2, num_heads, attention_mask=None):
     return attn
 
 
-
-
-
-def minilm_loss(t, s, num_heads, attention_mask=None, temperature=1.0):
+def minilm_loss(s, t, num_heads, attention_mask=None, temperature=1.0):
     attn_t = attention(t, t, num_heads, attention_mask)
     attn_s = attention(s, s, num_heads, attention_mask)
     loss = kl_div_loss(attn_s, attn_t, temperature=temperature)
@@ -83,16 +64,6 @@ def get_qkvs(model):
     qkvs = [{'q': a.q, 'k': a.k, 'v': a.v} for a in attns]    
     return qkvs
 
-def get_feat(model, layer_idx):
-    feat = []
-    layer = model.base_model.encoder.layer[layer_idx]
-    feat.append(layer.attention.self.q)
-    feat.append(layer.attention.self.k)
-    feat.append(layer.attention.self.v)
-    feat.append(layer.attention.output.h)
-    feat.append(layer.intermediate.h)
-    feat.append(layer.output.h)
-    return feat
 
 def bert_self_attention_forward(
     self,

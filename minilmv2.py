@@ -40,7 +40,6 @@ class Lite(LightningLite):
     def run(self, config):
         if self.is_global_zero:
             print(OmegaConf.to_yaml(config))
-            wandb.init(project='language-model-distillation', config=config)
         
         tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path)
         collator = DataCollatorForLanguageModeling(tokenizer, mlm=True)
@@ -53,7 +52,8 @@ class Lite(LightningLite):
                 print(k, v.size())
 
         teacher, student = prepare_model(config)
-        if self.is_global_zero:
+        if self.is_global_zero and not config.debug:
+            wandb.init(project='language-model-distillation', config=config)
             wandb.watch(student, log='gradients', log_freq=10)
 
         params = get_param_groups(student, config.optimizer.weight_decay)
@@ -73,15 +73,15 @@ class Lite(LightningLite):
                 batch = next(dataiter)
             batch = BatchEncoding(batch).to(self.device)
 
-            tout = teacher.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
-            sout = student.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
+            to = teacher.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
+            so = student.base_model(input_ids = batch.input_ids, attention_mask = batch.attention_mask)
 
             teacher_qkv = get_qkvs(teacher)[config.train.teacher_layer_index] # (batch, head, seq, head_dim)
             student_qkv = get_qkvs(student)[config.train.student_layer_index] # (batch, head, seq, head_dim)
 
-            loss_q = minilm_loss(teacher_qkv['q'], student_qkv['q'], config.train.num_relation_heads)
-            loss_k = minilm_loss(teacher_qkv['k'], student_qkv['k'], config.train.num_relation_heads)
-            loss_v = minilm_loss(teacher_qkv['v'], student_qkv['v'], config.train.num_relation_heads)
+            loss_q = minilm_loss(student_qkv['q'], teacher_qkv['q'], config.train.num_relation_heads)
+            loss_k = minilm_loss(student_qkv['k'], teacher_qkv['k'], config.train.num_relation_heads)
+            loss_v = minilm_loss(student_qkv['v'], teacher_qkv['v'], config.train.num_relation_heads)
             loss = loss_q + loss_k + loss_v
 
             optimizer.zero_grad()
@@ -89,8 +89,13 @@ class Lite(LightningLite):
             optimizer.step()
             scheduler.step()
 
+            log = {'loss': loss.item(), 'loss_q': loss_q.item(), 'loss_k': loss_k.item(), 'loss_v': loss_v.item()}
+            if config.debug:
+                print(log)
+                break
+
             if self.is_global_zero:
-                wandb.log({'loss': loss, 'loss_q': loss_q, 'loss_k': loss_k, 'loss_v': loss_v})
+                wandb.log(log)
                 if (st + 1) % 10000 == 0:
                     student.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
                     tokenizer.save_pretrained(os.path.join(config.save_dir, f'{st+1:06d}'))
@@ -99,6 +104,7 @@ class Lite(LightningLite):
 @hydra.main(config_path='conf', config_name='minilmv2')
 def main(config: DictConfig):
     Lite(**config.lite).run(config)
+
 
 if __name__ == '__main__':
     main()

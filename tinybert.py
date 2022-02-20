@@ -20,17 +20,6 @@ from src.data import prepare_dataset
 from src.distil import kl_div_loss, to_distill
 from src.model import get_param_groups, prepare_optimizer, prepare_scheduler
 
-class Student(nn.Module):
-    def __init__(self, transformer, teacher_hidden_size):
-        super().__init__()
-        self.transformer = transformer
-        self.config = transformer.config
-        self.base_model = self.transformer.base_model
-        self.upsampler = nn.ModuleList([nn.Linear(self.config.hidden_size, teacher_hidden_size) for _ in range(self.config.num_hidden_layers+1)])
-
-    def forward(self, input_ids, attention_mask):
-        return self.transformer(input_ids, attention_mask)
-
 
 def prepare_model(config):
     teacher = AutoModelForMaskedLM.from_pretrained(**config.teacher)
@@ -38,8 +27,8 @@ def prepare_model(config):
         param.requires_grad = False
 
     cfg = AutoConfig.from_pretrained(**config.student)
-    _student = AutoModelForMaskedLM.from_config(cfg)
-    student = Student(_student, teacher.config.hidden_size)
+    student = AutoModelForMaskedLM.from_config(cfg)
+    student.upsampler = nn.ModuleList([nn.Linear(student.config.hidden_size, teacher.config.hidden_size) for _ in range(student.config.num_hidden_layers+1)])
 
     teacher = to_distill(teacher)
     student = to_distill(student)

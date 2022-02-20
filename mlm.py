@@ -75,20 +75,25 @@ class Lite(LightningLite):
             so = student(input_ids=batch.masked_input_ids, attention_mask=batch.attention_mask, labels=batch.masked_labels)
 
             loss = 0.
+            log = {}
+
             if config.train.alpha_mlm > 0:
                 mlm_loss = so.loss
                 loss += config.train.alpha_mlm * mlm_loss
+                log['mlm_loss'] = mlm_loss.item()
 
             if config.train.alpha_distil > 0:
                 distil_loss = kl_div_loss(so.logits, to.logits, config.train.temperature)
                 loss += config.train.alpha_distil * distil_loss
+                log['distil_loss'] = distil_loss.item()
+
+            log['loss'] = loss.item()
 
             optimizer.zero_grad()
             self.backward(loss)
             optimizer.step()
             scheduler.step()
 
-            log = {'loss': loss.item(), 'mlm_loss': mlm_loss.item(), 'distil_loss': distil_loss.item()}
             if config.debug:
                 print(log)
                 break

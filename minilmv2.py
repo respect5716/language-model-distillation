@@ -17,7 +17,7 @@ from transformers import BatchEncoding, DataCollatorForLanguageModeling
 from datasets import load_dataset, concatenate_datasets
 
 from src.data import prepare_dataset
-from src.distil import to_distill, minilm_loss, get_qkvs
+from src.distil import to_distill, attention, kl_div_loss
 from src.model import get_param_groups, prepare_optimizer, prepare_scheduler
 
 
@@ -34,6 +34,18 @@ def prepare_model(config):
     teacher.eval()
     student.train()
     return teacher, student
+
+
+def get_qkvs(model):
+    attns = [l.attention.self for l in model.base_model.encoder.layer]
+    qkvs = [{'q': a.q, 'k': a.k, 'v': a.v} for a in attns]    
+    return qkvs
+
+def minilm_loss(s, t, num_heads, attention_mask=None, temperature=1.0):
+    attn_t = attention(t, t, num_heads, attention_mask)
+    attn_s = attention(s, s, num_heads, attention_mask)
+    loss = kl_div_loss(attn_s, attn_t, temperature=temperature)
+    return loss
 
 
 class Lite(LightningLite):

@@ -38,13 +38,6 @@ def attention(h1, h2, num_heads, attention_mask=None):
     return attn
 
 
-def minilm_loss(s, t, num_heads, attention_mask=None, temperature=1.0):
-    attn_t = attention(t, t, num_heads, attention_mask)
-    attn_s = attention(s, s, num_heads, attention_mask)
-    loss = kl_div_loss(attn_s, attn_t, temperature=temperature)
-    return loss
-
-
 def to_distill(model):
     model.base_model.encoder.layer[0].attention.self.__class__._forward = bert_self_attention_forward
     model.base_model.encoder.layer[0].attention.output.__class__._forward = bert_self_output_forward
@@ -57,12 +50,6 @@ def to_distill(model):
         layer.intermediate.forward = layer.intermediate._forward
         layer.output.forward = layer.output._forward
     return model
-
-
-def get_qkvs(model):
-    attns = [l.attention.self for l in model.base_model.encoder.layer]
-    qkvs = [{'q': a.q, 'k': a.k, 'v': a.v} for a in attns]    
-    return qkvs
 
 
 def bert_self_attention_forward(
@@ -78,19 +65,20 @@ def bert_self_attention_forward(
     mixed_query_layer = self.query(hidden_states)
     mixed_key_layer = self.key(hidden_states)
     mixed_value_layer = self.value(hidden_states)
-    
-    query_layer = self.transpose_for_scores(mixed_query_layer)
-    key_layer = self.transpose_for_scores(mixed_key_layer)
-    value_layer = self.transpose_for_scores(mixed_value_layer)
-    
-    self.q = mixed_query_layer # (Batch, Seq, Dim)
-    self.k = mixed_key_layer # (Batch, Seq, Dim)
-    self.v = mixed_value_layer # (Batch, Seq, Dim)
 
+    self.q = mixed_query_layer # (bs, sq, dim)
+    self.k = mixed_key_layer # (bs, sq, dim)
+    self.v = mixed_value_layer # (bs, sq, dim)
+    
+    query_layer = self.transpose_for_scores(mixed_query_layer) # (bs, nh, sq, dim)
+    key_layer = self.transpose_for_scores(mixed_key_layer) # (bs, nh, sq, dim)
+    value_layer = self.transpose_for_scores(mixed_value_layer) # (bs, nh, sq, dim)
+    
     if self.is_decoder:
         past_key_value = (key_layer, value_layer)
 
-    attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+    attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2)) # (bs, nh, sq, sq)
+    self.attn = attention_scores
 
     if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
         seq_length = hidden_states.size()[1]

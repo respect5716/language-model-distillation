@@ -60,7 +60,6 @@ class Lite(LightningLite):
         _, optimizer = self.setup(student, optimizer)
         _ = teacher.to(self.device)
 
-        
         dataiter = iter(dataloader)
         pbar = tqdm(range(config.train.num_train_steps))
         for st in pbar:
@@ -74,9 +73,7 @@ class Lite(LightningLite):
             to = teacher(input_ids=batch.masked_input_ids, attention_mask=batch.attention_mask)
             so = student(input_ids=batch.masked_input_ids, attention_mask=batch.attention_mask, labels=batch.masked_labels)
 
-            loss = 0.
-            log = {}
-
+            loss, log = 0., {}
             if config.train.alpha_mlm > 0:
                 mlm_loss = so.loss
                 loss += config.train.alpha_mlm * mlm_loss

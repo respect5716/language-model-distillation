@@ -49,7 +49,7 @@ optimizer:
 scheduler:
   name: linear
   num_train_steps: ${train.num_train_steps}
-  warmup_ratio: 0.05
+  warmup_ratio: 0.01
 
 
 train:

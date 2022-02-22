@@ -3,7 +3,7 @@ defaults:
   - lang:
     - en
   - size:
-    - s3
+    - s2
 
 debug: true
 

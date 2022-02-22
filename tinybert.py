@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 from pytorch_lightning.lite import LightningLite
 
-from transformers import AutoConfig, AutoTokenizer, AutoModelForMaskedLM
+from transformers import AutoConfig, AutoTokenizer, AutoModel, AutoModelForMaskedLM
 from transformers import BatchEncoding, DataCollatorForLanguageModeling
 from datasets import load_dataset, concatenate_datasets
 
